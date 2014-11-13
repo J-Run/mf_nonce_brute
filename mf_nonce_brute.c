@@ -18,8 +18,6 @@ clock_t ticks; long count;
 
 int checked_cnt[THREADS];
 
-
-
 int thcount = THREADS;
 pthread_t tid[THREADS];
  
@@ -27,12 +25,12 @@ int fin_flag =0;
 
 //////////////////// define options here 
 
-uint32_t uid = 0x11223344;     // serial number
-uint32_t nt_start= 0x00000000; // initial bruteforce tag challenge
-uint32_t nr_enc = 0x11223344;  // encrypted reader challenge
-uint32_t ar_enc = 0x11223344;  // encrypted reader response
-uint32_t at_enc = 0x11223344;  // encrypted tag response 
-uint32_t enc_4 =   0x11223344; // next encrypted command to sector
+uint32_t uid = 0x0;     // serial number
+uint32_t nt_start= 0x0; // initial bruteforce tag challenge
+uint32_t nr_enc = 0x0;  // encrypted reader challenge
+uint32_t ar_enc = 0x0;  // encrypted reader response
+uint32_t at_enc = 0x0;  // encrypted tag response 
+uint32_t enc_4 =   0x0; // next encrypted command to sector
 
 
 ////////////////////
@@ -77,8 +75,9 @@ int brute_thread(int shift)
 			printf("ks3:%08x\n", ks3);
 			printf("ks4:%08x\n", ks4);
 			printf("enc cmd:\t%08x\n", enc_4);		
+			if(enc_4){			
 			printf("decrypted cmd:\t%08x\n", ks4^enc_4);
-			
+			}			
 			for(i=0;i<rolled_bytes;i++)
 			{
 				lfsr_rollback_byte(revstate,0,0);	
@@ -109,9 +108,41 @@ int brute_thread(int shift)
 
 
 int main (int argc, char *argv[]) {
+
+printf("Mifare classic nested auth key recovery. Phase 1.\n");
+
+  if (argc < 5) {
+    printf(" syntax: %s <uid> <nr> <ar> <at> [<next command>]\n\n",argv[0]);
+    return 1;
+  }
+
+sscanf(argv[1],"%x",&uid);
+sscanf(argv[2],"%x",&nr_enc);
+sscanf(argv[3],"%x",&ar_enc);
+sscanf(argv[4],"%x",&at_enc);
+if (argc > 5) {
+sscanf(argv[5],"%x",&enc_4);
+}
+
+printf("UID:\t\t%08x\n", uid);
+printf("Rdr nonce:\t%08x\n", nr_enc);
+printf("Rdr answer:\t%08x\n", ar_enc);
+printf("Tag answer:\t%08x\n", at_enc);
+if (enc_4)
+{
+	printf("Next cmd:\t%08x\n", enc_4);
+}
+else
+{
+	printf("Next cmd not defined\n");
+}
+
   
-printf("Now let's try to bruteforce encrypted tag nonce last bytes and get a key candidates!\n");
-printf("hahahaha!\n\n");
+printf("\nNow let's try to bruteforce encrypted tag nonce last bytes\n\n");
+
+
+
+
 
 int i = 0;
 int err;
