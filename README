@@ -1,3 +1,12 @@
+mf_nonce_brutehttps://github.com/J-Run/mf_nonce_brute/edit/master/README#
+Nested authentificated sector key recovery tool.
+Compatible tags:
+    Mifare Classic 1k (4k)
+    Mifare Plus in SL1 mode
+
+To recover keys to nested authentificated sectors you need a reader-card communication log. To get it use 
+hardware tools that able to sniff communication (for example Proxmark3 or HydraNFC).
+
 Sample trace:
 
     93 70 fd ac f6 d8 7f 21 4f  			  // select card with UID fdacf6d8
@@ -45,7 +54,7 @@ ks2:c1867dbd
 ks3:62b99451
 ks4:c42c9063
 enc cmd:	e225f832
-decrypted cmd:	26096851	<--- Look here! it is not kook like a valid command
+decrypted cmd:	26096851	<--- Look here! it is not look like a valid command
 
 Key candidate: [45e3ddbb2255]
 
@@ -59,10 +68,11 @@ ks2:509e1e18
 ks3:de441da3
 ks4:d221dedc
 enc cmd:	e225f832
-decrypted cmd:	300426ee	<--- But this one looks definetely like read request rfom 0x04 block
+decrypted cmd:	300426ee	<--- But this one looks definetely like read request from 0x04 block
 
-Key candidate: [ab09ffffffff]   <--- So here we got a last 4 bytes of key. First 2 bytes should be bruteforced in phase 2 with mf_key_brute tool that interacts with a card.
+Key candidate: [ab09ffffffff]   <--- So here we got a last 4 bytes of key. 
 
+First 2 bytes should be bruteforced in phase 2 with mf_key_brute tool that interacts with a card.
 
 
 
