@@ -81,6 +81,21 @@ Example with parity (from this trace http://www.proxmark.org/forum/viewtopic.php
 
 ./mf_nonce_brute 9c599b32 98d76b77 d6c6e870 ca7e0b63 3e709c8a 5a920d85 0 1 0
 
+Mifare classic nested auth key recovery. Phase 1.
+ syntax: ./mf_nonce_brute <uid> <{nr}> <{ar}> <{at}> [<{next command}> <{nt}> <ntparity1> <ntparity2> <ntparity3>]
+
+   {} = encrypted, ntparity1 : 0 if ! (parity mistmatch), 1 otherwise
+
+UID:            9c599b32
+Rdr nonce:      98d76b77
+Rdr answer:     d6c6e870
+Tag answer:     ca7e0b63
+Next cmd:       3e709c8a
+Tag encrypted nonce:    5a920d85
+Parity bit of nt_enc : 0 1 0
+Now let's try to bruteforce encrypted tag nonce last bytes
+
+
 + 561882:  1 :     26    
  +     64:  2 : TAG 04  00    
  +  10217:  2 :     93  20    
