@@ -39,10 +39,10 @@ uint32_t enc_4 =   0x0; // next encrypted command to sector
 
 
 
-void * brute_thread(void *arg)
+int brute_thread(int shift)
 {
 	struct Crypto1State *revstate;
-        int shift=* (int *) arg;   //done to avoid pthread warning
+
 	uint64_t key;     // recovered key candidate
 	uint32_t ks2;     // keystream used to encrypt reader response
 	uint32_t ks3;	  // keystream used to encrypt tag response
@@ -50,7 +50,7 @@ void * brute_thread(void *arg)
 	uint32_t nt;      // current tag nonce
 	
 	int rolled_bytes =0;
-         
+
 	printf("Thread #%d started\n",shift);
 	int i=0;
 	checked_cnt[shift] =0;
@@ -102,7 +102,7 @@ void * brute_thread(void *arg)
 	}
 	fin_flag++;
 	printf("***\nthread #%d finished\nfin_flag:\t%d\n", shift, fin_flag);
-	return NULL; 
+	return NULL;
 
 }
 
@@ -149,7 +149,7 @@ int err;
 
 while(i < thcount)
 {
-	err = pthread_create(&(tid[i]), NULL, brute_thread,&i);
+	err = pthread_create(&(tid[i]), NULL, &brute_thread, i);
 	if (err != 0)
 		printf("\ncan't create thread :[%s]", strerror(err));
 	else

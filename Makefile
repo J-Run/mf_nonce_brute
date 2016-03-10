@@ -1,6 +1,6 @@
 CC = gcc
 LD = gcc
-CFLAGS = -Wall -Winline -04
+CFLAGS = -Wall -Winline -O4
 LDFLAGS =
 
 OBJS = crapto1.o crypto1.o
