@@ -13,10 +13,7 @@
 #include "protocol.h"
 #include "iso14443crc.h"
 
-
-
 #define llx PRIx64
-#define lli PRIi64
 #define odd_parity(i) (( (i) ^ (i)>>1 ^ (i)>>2 ^ (i)>>3 ^ (i)>>4 ^ (i)>>5 ^ (i)>>6 ^ (i)>>7 ^ 1) & 0x01)
 
 // a global mutex to prevent interlaced printing from different threads
@@ -226,6 +223,24 @@ bool candidate_nonce(uint32_t xored, uint32_t nt, bool ev1) {
 	return TRUE;
 }
 
+bool checkValidCmd(uint32_t decrypted){
+	uint8_t cmd = (decrypted >> 24) & 0xFF;
+	for (int i = 0; i < sizeof(cmds); ++i){
+		if ( cmd == cmds[i] )
+			return TRUE;
+	}
+	return FALSE;
+}
+bool checkCRC(uint32_t decrypted){
+	uint8_t data[] = { 
+		(decrypted >> 24) & 0xFF,
+		(decrypted >> 16) & 0xFF,
+		(decrypted >> 8)  & 0xFF,
+		decrypted & 0xFF
+	};
+	return CheckCrc14443(CRC_14443_A, data, sizeof(data));
+}
+
 void* brute_thread(void *arguments) {
 	
 	//int shift = (int)arg;
@@ -233,7 +248,6 @@ void* brute_thread(void *arguments) {
 
 	struct Crypto1State *revstate;
 	uint64_t key;     // recovered key candidate
-	//uint32_t ks1;     // keystream used to encrypt tag nonce
 	uint32_t ks2;     // keystream used to encrypt reader response
 	uint32_t ks3;     // keystream used to encrypt tag response
 	uint32_t ks4;     // keystream used to encrypt next command
@@ -241,15 +255,17 @@ void* brute_thread(void *arguments) {
 	
 	uint32_t p64 = 0;
 	uint32_t count;
+	int found = 0;
 	
-	for (count = args->thread; count < 0xFFFF; count += thread_count) {
+	for (count = args->thread; count < 0xFFFF; count += thread_count>>1) {
+	
+		found = global_found;
+		if ( found ) break;
 		
 		nt = count << 16 | prng_successor(count, 16);
 		
-		if ( !candidate_nonce( args->xored, nt, args->ev1) ) {
-			__sync_fetch_and_add(&global_counter, 1);
+		if ( !candidate_nonce( args->xored, nt, args->ev1) )
 			continue;
-		}
 		
 		p64 = prng_successor(nt, 64);
 		ks2 = ar_enc ^ p64;
@@ -260,43 +276,33 @@ void* brute_thread(void *arguments) {
 		if (ks4 != 0) {
 			
 			// lock this section to avoid interlacing prints from different threats
-			pthread_mutex_lock(&print_lock);	
-			printf("\n**** Possible key candidate ****\n");
-			printf("thread #%d\n", args->thread);
+			pthread_mutex_lock(&print_lock);
+			if ( args->ev1 )
+				printf("\n**** Possible key candidate ****\n");
+
+#if 0			
+			printf("thread #%d %s\n", args->thread, (args->ev1)?"(Ev1)":"");
 			printf("current nt(%08x)  ar_enc(%08x)  at_enc(%08x)\n", nt, ar_enc, at_enc);
 			printf("ks2:%08x\n", ks2);
 			printf("ks3:%08x\n", ks3);
 			printf("ks4:%08x\n", ks4);
-
+#endif
 			if (cmd_enc) {
 				
 				uint32_t decrypted = ks4 ^ cmd_enc;
 				printf("CMD enc(%08x)\n", cmd_enc);
 				printf("    dec(%08x)\t", decrypted );
-				
-				uint8_t cmd = (decrypted >> 24) & 0xFF;
+
 				uint8_t isOK = 0;
 				// check if cmd exists
-				for (int i = 0; i < sizeof(cmds); ++i){
-					if ( cmd == cmds[i] ) {							
-						isOK = 1;
-						break;
-					}
-				}
+				isOK = checkValidCmd(decrypted);
+
 				// Add a crc-check.
-				uint8_t data[] = { 
-					(decrypted >> 24) & 0xFF,
-					(decrypted >> 16) & 0xFF,
-					(decrypted >> 8)  & 0xFF,
-					decrypted & 0xFF
-				};
-				isOK = CheckCrc14443(CRC_14443_A, data, sizeof(data));
+				isOK = checkCRC(decrypted);
 
 				if ( !isOK) {
 					printf("<-- not a valid cmd\n");
-					pthread_mutex_unlock(&print_lock);  
-					free(revstate);
-					__sync_fetch_and_add(&global_counter, 1);					
+					pthread_mutex_unlock(&print_lock);
 					continue;
 				} else {
 					printf("<-- Valid cmd\n");
@@ -309,7 +315,7 @@ void* brute_thread(void *arguments) {
 			lfsr_rollback_word(revstate, nr_enc, 1);
 			lfsr_rollback_word(revstate, uid ^ nt, 0);
 			crypto1_get_lfsr(revstate, &key);
-			
+			free(revstate);	
 			if ( args->ev1 ) {
 				printf("\nKey candidate: [%012"llx"]\n\n", key);
 				__sync_fetch_and_add(&global_found_candidate, 1);
@@ -317,17 +323,10 @@ void* brute_thread(void *arguments) {
 				printf("\nValid Key found: [%012"llx"]\n\n", key);
 				__sync_fetch_and_add(&global_found, 1);
 			}
-			
 			//release lock
-			pthread_mutex_unlock(&print_lock);  
-		}
-		
-        free(revstate);
-		__sync_fetch_and_add(&global_counter, 1);
+			pthread_mutex_unlock(&print_lock);
+		}		
 	}
-
-	__sync_fetch_and_add(&global_fin_flag, 1);
-//printf("*** thread #%d finished\n", args->thread);
 	return NULL;
 }
 
@@ -360,6 +359,7 @@ int main (int argc, char *argv[]) {
 		sscanf(argv[9],"%x",&cmd_enc);
 	}
 	
+	printf("-------------------------------------------------\n");
 	printf("uid:\t\t%08x\n",uid);
 	printf("nt encrypted:\t%08x\n",nt_enc);
 	printf("nt parity err:\t%04x\n",nt_par_err);
@@ -373,8 +373,6 @@ int main (int argc, char *argv[]) {
 		printf("next cmd enc:\t%08x\n\n",cmd_enc);
 	}
 	
-	printf("\nNow let's try to bruteforce encrypted tag nonce last bytes\n\n");
-	
 	clock_t t1 = clock();
 	time_t start, end;
 	time(&start);
@@ -387,24 +385,33 @@ int main (int argc, char *argv[]) {
 	uint16_t xored = xored_bits(nt_par, nt_enc, ar_par, ar_enc, at_par, at_enc);
 	
 #ifndef __WIN32
-        thread_count = sysconf(_SC_NPROCESSORS_CONF);
-		if ( thread_count < 1)
-			thread_count = 1;
+	thread_count = sysconf(_SC_NPROCESSORS_CONF);
+	if ( thread_count < 1)
+		thread_count = 2;
 #endif  /* _WIN32 */
 	
+	printf("\nStarting %d threads to bruteforce encrypted tag nonce last bytes\n", thread_count);
+		
 	pthread_t threads[thread_count];
 
 	// create a mutex to avoid interlacing print commands from our different threads
 	pthread_mutex_init(&print_lock, NULL);
 	
-	for (int i = 0 ; i < thread_count; ++i) {
+	for (int i = 0 ; i < thread_count>>1; ++i) {
 		struct thread_args *a = malloc(sizeof(struct thread_args));
 		a->xored = xored;
 		a->thread = i;
-		a->ev1 = (i&1);
+		a->ev1 = false;
 		pthread_create(&threads[i], NULL, brute_thread,(void*)a);
 	}
-
+	for (int i = thread_count>>1 ; i < thread_count; ++i) {
+		struct thread_args *a = malloc(sizeof(struct thread_args));
+		a->xored = xored;
+		a->thread = i - (thread_count>>1);
+		a->ev1 = true;
+		pthread_create(&threads[i], NULL, brute_thread,(void*)a);
+	}
+	
 	// wait for threads to terminate:
 	for (int i = 0; i < thread_count; ++i)
 		pthread_join(threads[i], NULL);
