@@ -359,7 +359,7 @@ int main (int argc, char *argv[]) {
 		thread_count = 2;
 #endif  /* _WIN32 */
 	
-	printf("\Bruteforce using %d threads to find encrypted tagnonce last bytes\n", thread_count);
+	printf("\nBruteforce using %d threads to find encrypted tagnonce last bytes\n", thread_count);
 		
 	pthread_t threads[thread_count];
 
