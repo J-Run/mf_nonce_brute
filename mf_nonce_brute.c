@@ -355,11 +355,11 @@ int main (int argc, char *argv[]) {
 	
 #ifndef __WIN32
 	thread_count = sysconf(_SC_NPROCESSORS_CONF);
-	if ( thread_count < 1)
+	if ( thread_count < 2)
 		thread_count = 2;
 #endif  /* _WIN32 */
 	
-	printf("\nStarting %d threads to bruteforce encrypted tag nonce last bytes\n", thread_count);
+	printf("\Bruteforce using %d threads to find encrypted tagnonce last bytes\n", thread_count);
 		
 	pthread_t threads[thread_count];
 
@@ -375,14 +375,13 @@ int main (int argc, char *argv[]) {
 	pthread_create(&threads[0], NULL, brute_thread, (void*)a);
 	
 	// the rest of available threads to EV1 scenario
-	// 
 	for (int i = 0; i < thread_count-1; ++i) {
-		struct thread_args *a = malloc(sizeof(struct thread_args));
-		a->xored = xored;
-		a->thread = i+1;
-		a->idx = i;
-		a->ev1 = true;
-		pthread_create(&threads[i+1], NULL, brute_thread, (void*)a);
+		struct thread_args *b = malloc(sizeof(struct thread_args));
+		b->xored = xored;
+		b->thread = i+1;
+		b->idx = i;
+		b->ev1 = true;
+		pthread_create(&threads[i+1], NULL, brute_thread, (void*)b);
 	}
 	
 	// wait for threads to terminate:
@@ -395,7 +394,7 @@ int main (int argc, char *argv[]) {
 	
 	t1 = clock() - t1;
 	if ( t1 > 0 )
-		printf("Execution time: %" PRIu64 " ticks\n", t1);
+		printf("Execution time: %.0f ticks\n",  (float)t1);
 	
 	// clean up mutex
 	pthread_mutex_destroy(&print_lock);
