@@ -8,12 +8,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
-#include "sleep.h"
 #include "crapto1.h"
 #include "protocol.h"
 #include "iso14443crc.h"
 
-#define llx PRIx64
 #define odd_parity(i) (( (i) ^ (i)>>1 ^ (i)>>2 ^ (i)>>3 ^ (i)>>4 ^ (i)>>5 ^ (i)>>6 ^ (i)>>7 ^ 1) & 0x01)
 
 // a global mutex to prevent interlaced printing from different threads
@@ -34,6 +32,7 @@ uint32_t at_par_err = 0;
 typedef struct thread_args{
 	uint16_t xored;
 	int thread;
+	int idx;
 	bool ev1;
 } targs;
 
@@ -142,94 +141,68 @@ bool candidate_nonce(uint32_t xored, uint32_t nt, bool ev1) {
 		//1st (1st nt)
 		byte = (nt >> 24) & 0xFF;
 		check = odd_parity(byte) ^ ((nt > 16) & 1) ^ ((xored >> 9) & 1);
-		if(check)
-			return FALSE;
+		if(check) return false;
 			
 		//2nd (2nd nt)
 		byte = (nt >> 16) & 0xFF;
 		check = odd_parity(byte) ^ ((nt >> 8) & 1) ^ ((xored >> 8 ) & 1);
-		if(check)
-			return FALSE;
+		if(check) return false;
 	}
 		
 	//3rd (3rd nt)
 	byte = (nt >> 8) & 0xFF;
 	check = odd_parity(byte) ^ (nt & 1) ^ ((xored >> 7) & 1);
-	if (check) {
-		//~ printf("error 3\n");
-		return FALSE;
-	}
+	if (check) return false;
 	
 	uint32_t ar = prng_successor(nt, 64);
 	
 	//4th (1st ar)
 	byte = (ar >> 24) & 0xFF;
 	check = odd_parity(byte) ^ ((ar >> 16) & 1) ^ ((xored >> 6) & 1);
-	if (check) {
-		//~ printf("error 4\n");
-		return FALSE;
-	}
+	if (check) return false;
 	
 	//5th (2nd ar)
 	byte = (ar >> 16) & 0x0FF;
 	check = odd_parity(byte) ^ ((ar >> 8) & 1) ^ ((xored >> 5) & 1);
-	if (check) {
-		//~ printf("error 5\n");
-		return FALSE;
-	}
+	if (check) return false;
 	
 	//6th (3rd ar)
 	byte = (ar >> 8) & 0xFF;
 	check = odd_parity(byte) ^ (ar & 1) ^ ((xored >> 4) & 1);
-	if (check) {
-		//~ printf("error 6\n");
-		return FALSE;
-	}
+	if (check) return false;
 		
 	uint32_t at = prng_successor(nt, 96);
 		
 	//7th (4th ar)
 	byte = ar & 0xFF;
 	check = odd_parity(byte) ^ ((at >> 24) & 1) ^ ((xored >> 3) & 1);
-	if (check) {
-		//~ printf("error 7\n");
-		return FALSE;
-	}
+	if (check) return false;
 	
 	//8th (1st at)
 	byte = (at >> 24) & 0xFF;
 	check = odd_parity(byte) ^ ((at >> 16) & 1) ^ ((xored >> 2) & 1);
-	if (check) {
-		//~ printf("error 8\n");
-		return FALSE;
-	}
+	if (check) return false;
 	
 	//9th (2nd at)
 	byte = (at >> 16) & 0xFF;
 	check = odd_parity(byte) ^ ((at >> 8) & 1) ^ ((xored >> 1) & 1) ;
-	if (check) {
-		//~ printf("error 9\n");
-		return FALSE;
-	}
+	if (check) return false;
 	
 	//10th (3rd at)
 	byte = (at >> 8) & 0xFF;
 	check = odd_parity(byte) ^ (at & 1) ^ (xored & 1);
-	if (check) {
-		//~ printf("error 10\n");
-		return FALSE;
-	}
+	if (check) return false;
 		
-	return TRUE;
+	return true;
 }
 
 bool checkValidCmd(uint32_t decrypted){
 	uint8_t cmd = (decrypted >> 24) & 0xFF;
 	for (int i = 0; i < sizeof(cmds); ++i){
 		if ( cmd == cmds[i] )
-			return TRUE;
+			return true;
 	}
-	return FALSE;
+	return false;
 }
 bool checkCRC(uint32_t decrypted){
 	uint8_t data[] = { 
@@ -256,8 +229,10 @@ void* brute_thread(void *arguments) {
 	uint32_t p64 = 0;
 	uint32_t count;
 	int found = 0;
-	
-	for (count = args->thread; count < 0xFFFF; count += thread_count>>1) {
+	// TC == 4  (
+	// threads calls 0 ev1 == false
+	// threads calls 0,1,2  ev1 == true  	
+	for (count = args->idx; count < 0xFFFF; count += thread_count-1) {
 	
 		found = global_found;
 		if ( found ) break;
@@ -281,14 +256,13 @@ void* brute_thread(void *arguments) {
 				printf("\n**** Possible key candidate ****\n");
 
 #if 0			
-			printf("thread #%d %s\n", args->thread, (args->ev1)?"(Ev1)":"");
+			printf("thread #%d idx %d %s\n", args->thread, args->idx, (args->ev1)?"(Ev1)":"");
 			printf("current nt(%08x)  ar_enc(%08x)  at_enc(%08x)\n", nt, ar_enc, at_enc);
 			printf("ks2:%08x\n", ks2);
 			printf("ks3:%08x\n", ks3);
 			printf("ks4:%08x\n", ks4);
 #endif
 			if (cmd_enc) {
-				
 				uint32_t decrypted = ks4 ^ cmd_enc;
 				printf("CMD enc(%08x)\n", cmd_enc);
 				printf("    dec(%08x)\t", decrypted );
@@ -316,11 +290,12 @@ void* brute_thread(void *arguments) {
 			lfsr_rollback_word(revstate, uid ^ nt, 0);
 			crypto1_get_lfsr(revstate, &key);
 			free(revstate);	
+			
 			if ( args->ev1 ) {
-				printf("\nKey candidate: [%012"llx"]\n\n", key);
+				printf("\nKey candidate: [%012" PRIx64 "]\n\n", key);
 				__sync_fetch_and_add(&global_found_candidate, 1);
 			} else {
-				printf("\nValid Key found: [%012"llx"]\n\n", key);
+				printf("\nValid Key found: [%012" PRIx64 "]\n\n", key);
 				__sync_fetch_and_add(&global_found, 1);
 			}
 			//release lock
@@ -330,34 +305,32 @@ void* brute_thread(void *arguments) {
 	return NULL;
 }
 
+int usage(){
+	printf(" syntax: mf_nonce_brute <uid> <nt> <nt_par_err> <nr> <ar> <ar_par_err> <at> <at_par_err> [<next_command>]\n\n");
+	printf(" example:   nt in trace = 8c! 42 e6! 4e!\n");
+	printf("                     nt = 8c42e64e\n");
+	printf("             nt_par_err = 1011\n\n");
+	printf("\n expected outcome:\n");
+	printf("  KEY 0xFFFFFFFFFFFF ==   fa247164 fb47c594 0000 71909d28 0c254817 1000 0dc7cfbd 1110\n");	
+	return 1;
+}
+
 int main (int argc, char *argv[]) {
 	printf("Mifare classic nested auth key recovery. Phase 1.\n");
 
-	if(argc < 9) {
-		printf(" syntax: %s <uid> <{nt}> <nt_par_err> <{nr}> <{ar}> <ar_par_err> <{at}> <at_par_err> [<{next_command}>]\n\n",argv[0]);
-		printf(" example:   nt in trace = 8c!  42 e6! 4e!\n");
-		printf("                     nt = 8c42e64e\n");
-		printf("             nt_par_err = 1011\n\n");
-		printf("  0xFFFFFFFFFFFF ==   fa247164 fb47c594 0000 71909d28 0c254817 1000 0dc7cfbd 1110\n");
-		return 1;
-	}
+	if(argc < 9) return usage();
 
 	sscanf(argv[1],"%x",&uid);
-
 	sscanf(argv[2],"%x",&nt_enc);
 	sscanf(argv[3],"%x",&nt_par_err);
-
 	sscanf(argv[4],"%x",&nr_enc);
-
 	sscanf(argv[5],"%x",&ar_enc);
 	sscanf(argv[6],"%x",&ar_par_err);
-
 	sscanf(argv[7],"%x",&at_enc);
 	sscanf(argv[8],"%x",&at_par_err);
 
-	if(argc > 9) {
+	if(argc > 9)
 		sscanf(argv[9],"%x",&cmd_enc);
-	}
 	
 	printf("-------------------------------------------------\n");
 	printf("uid:\t\t%08x\n",uid);
@@ -369,14 +342,10 @@ int main (int argc, char *argv[]) {
 	printf("at encrypted:\t%08x\n",at_enc);
 	printf("at parity err:\t%04x\n",at_par_err);
 
-	if(argc > 9) {
+	if(argc > 9)
 		printf("next cmd enc:\t%08x\n\n",cmd_enc);
-	}
 	
 	clock_t t1 = clock();
-	time_t start, end;
-	time(&start);
-	
 	uint16_t nt_par = parity_from_err(nt_enc, nt_par_err);
 	uint16_t ar_par = parity_from_err(ar_enc, ar_par_err);
 	uint16_t at_par = parity_from_err(at_enc, at_par_err);
@@ -397,19 +366,23 @@ int main (int argc, char *argv[]) {
 	// create a mutex to avoid interlacing print commands from our different threads
 	pthread_mutex_init(&print_lock, NULL);
 	
-	for (int i = 0 ; i < thread_count>>1; ++i) {
+	// one thread T0 for none EV1.
+	struct thread_args *a = malloc(sizeof(struct thread_args));
+	a->xored = xored;
+	a->thread = 0;
+	a->idx = 0;
+	a->ev1 = false;
+	pthread_create(&threads[0], NULL, brute_thread, (void*)a);
+	
+	// the rest of available threads to EV1 scenario
+	// 
+	for (int i = 0; i < thread_count-1; ++i) {
 		struct thread_args *a = malloc(sizeof(struct thread_args));
 		a->xored = xored;
-		a->thread = i;
-		a->ev1 = false;
-		pthread_create(&threads[i], NULL, brute_thread,(void*)a);
-	}
-	for (int i = thread_count>>1 ; i < thread_count; ++i) {
-		struct thread_args *a = malloc(sizeof(struct thread_args));
-		a->xored = xored;
-		a->thread = i - (thread_count>>1);
+		a->thread = i+1;
+		a->idx = i;
 		a->ev1 = true;
-		pthread_create(&threads[i], NULL, brute_thread,(void*)a);
+		pthread_create(&threads[i+1], NULL, brute_thread, (void*)a);
 	}
 	
 	// wait for threads to terminate:
@@ -421,10 +394,8 @@ int main (int argc, char *argv[]) {
 	}
 	
 	t1 = clock() - t1;
-	time(&end);
-	double elapsed_time = difftime(end, start);	
 	if ( t1 > 0 )
-		printf("Time in mf_nonce_brute (Phase 1): %.0f ticks %.1f seconds\n", (float)t1, elapsed_time);
+		printf("Execution time: %" PRIu64 " ticks\n", t1);
 	
 	// clean up mutex
 	pthread_mutex_destroy(&print_lock);
