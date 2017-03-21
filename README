@@ -7,6 +7,9 @@ Compatible tags:
 To recover keys to nested authentificated sectors you need a reader-card communication log. To get it use 
 hardware tools that able to sniff communication (for example Proxmark3 or HydraNFC).
 
+This enhanced version
+First 2 bytes should be bruteforced in phase 2 with mf_key_brute tool that interacts with a card.
+
 Sample trace:
 
     93 70 fd ac f6 d8 7f 21 4f  			  // select card with UID fdacf6d8
@@ -39,41 +42,110 @@ TAG b2 fc 6c 65 60 ec 35 83 87 56 e3 7e 3c bf 38 b8 73 21  // probably data
     99 92 13 55 					   // probably read cmd
 TAG 93 5b 65 a3 1d 8c 75 b8 3a 63 e2 31 f0 d0 a9 24 9a f6  // probably data 
 
+##############################################################################################
 
-./mf_nonce_brute fdacf6d8 8e213a29 a4807e02 b943748d e225f832
-                 ^--UID   ^-nr_enc ^-ar_enc ^-at_enc ^-encrypted next cmd
+ Mifare classic nested auth key recovery. Phase 1.
+ syntax: mf_nonce_brute.exe <uid> <{nt}> <nt_par_err> <{nr}> <{ar}> <ar_par_err> <{at}> <at_par_err> [<{next_command}>]
 
-After all we get some key last bytes candidates:
+ example:   nt in trace = 8c!  42 e6! 4e!
+                     nt = 8c42e64e
+             nt_par_err = 1011
+####
 
-**** Key candidate found ****
-thread #0
-current nt:00001bf4
-current ar_enc:a4807e02
-current at_enc:b943748d
-ks2:c1867dbd
-ks3:62b99451
-ks4:c42c9063
-enc cmd:	e225f832
-decrypted cmd:	26096851	<--- Look here! it is not look like a valid command
+Example with parity (from this trace http://www.proxmark.org/forum/viewtopic.php?pid=550#p550) 
+----------------------------------------------------------------------------------------------
+ + 561882:  1 :     26    
+ +     64:  2 : TAG 04  00    
+ +  10217:  2 :     93  20    
+ +     64:  5 : TAG 9c  59  9b  32  6c    					UID
+ +  12313:  9 :     93  70  9c  59  9b  32  6c  6b  30    
+ +     64:  3 : TAG 08  b6  dd    
+ + 923318:  4 :     60  00  f5  7b    						AUTH Block 0
+ +    112:  4 : TAG 82  a4  16  6c    						Nonce Tag (NT)
+ +   6985:  8 :     a1  e4! 58  ce! 6e  ea! 41  e0!       	NR , AR   
+ +     64:  4 : TAG 5c! ad  f4  39!   						AT 
+ + 811513:  4 :     8e  0e! 5d! b9        					AUTH Block 0 (nested)
+ +    112:  4 : TAG 5a! 92  0d! 85! 						Nonce Tag (NT)
+ +   6946:  8 :     98! d7  6b! 77  d6  c6  e8  70			NR , AR  
+ +     64:  4 : TAG ca  7e! 0b! 63!							AT 
+ + 670868:  4 :     3e! 70  9c! 8a 
+ +    112:  4 : TAG 36! 41  24! 79    
+ +   9505:  8 :     1b! 8c  3a! 48! 83  5a  4a! 27
+ +     64:  4 : TAG 40! 6a! 99! 4b    
+ + 905612:  4 :     c9  7c  64! 13!       !crc
+ +    112:  4 : TAG b5! ab! 1d! 2b    
+ +   6936:  8 :     7e! d2  5c! ca! 4b! 50! 88! c4        !crc
+ +     64:  4 : TAG bf  dd  01  be!   
+ + 987853:  4 :     56  98  49  d6!       !crc
+ 
+#
+# Samples
+#                                      |-nt_par_err	          |-at_par_err  |-at_par_err
+#  	./mf_nonce_brute 9c599b32 82a4166c 0000 a1e458ce 6eea41e0 0101 5cadf439 1001 3e709c8a
+#                    ^--UID   ^-nt_enc ^    ^-nr_enc ^-ar_enc ^    ^-at_enc ^    ^-encrypted next cmd
+#
+#
+# These two taken from above uses the plaintext tagnonce (nt) '82a4166c',  it still finds a possible key candidate.
+#
+./mf_nonce_brute 9c599b32 82a4166c 0000 a1e458ce 6eea41e0 0101 5cadf439 1001 
+./mf_nonce_brute 9c599b32 82a4166c 0000 98d76b77 d6c6e870 0000 ca7e0b63 0111
 
-Key candidate: [45e3ddbb2255]
+# This uses the encrypted tagnonce (nt) '5a920d85', it finds a valid key.
+#
+./mf_nonce_brute 9c599b32 5a920d85 1011 98d76b77 d6c6e870 0000 ca7e0b63 0111
 
-Checked 49.19 % 	32236
-**** Key candidate found ****
-thread #0
-current nt:00007e64
-current ar_enc:a4807e02
-current at_enc:b943748d
-ks2:509e1e18
-ks3:de441da3
-ks4:d221dedc
-enc cmd:	e225f832
-decrypted cmd:	300426ee	<--- But this one looks definetely like read request from 0x04 block
+# This uses the encrypted tagnonce (nt) '5a920d85' and the encrypted cmd '3e709c8a' to validate , it finds a valid key.
+#
+./mf_nonce_brute 9c599b32 5a920d85 1011 98d76b77 d6c6e870 0000 ca7e0b63 0111 3e709c8a
 
-Key candidate: [ab09ffffffff]   <--- So here we got a last 4 bytes of key. 
+# Another sample
+./mf_nonce_brute fa247164 fb47c594 0000 71909d28 0c254817 1000 0dc7cfbd 1110
 
-First 2 bytes should be bruteforced in phase 2 with mf_key_brute tool that interacts with a card.
+#
+#
+#
+# demo
+#
+pm3 ~/tools/mf_nonce_brute$ mf_nonce_brute.exe fa247164 fb47c594 0000 71909d28 0c254817 1000 0dc7cfbd 1110
+Mifare classic nested auth key recovery. Phase 1.
+-------------------------------------------------
+uid:            fa247164
+nt encrypted:   fb47c594
+nt parity err:  0000
+nr encrypted:   71909d28
+ar encrypted:   0c254817
+ar parity err:  1000
+at encrypted:   0dc7cfbd
+at parity err:  1110
+
+Starting 4 threads to bruteforce encrypted tag nonce last bytes
+
+Valid Key found: [ffffffffffff]
+
+Time in mf_nonce_brute (Phase 1): 2496 ticks 2.0 seconds
+pm3 ~/tools/mf_nonce_brute$
+#
+#
+#
+pm3 ~/tools/mf_nonce_brute$ ./mf_nonce_brute.exe 9c599b32 5a920d85 1011 98d76b77 d6c6e870 0000 ca7e0b63 0111 3e709c8a
+Mifare classic nested auth key recovery. Phase 1.
+-------------------------------------------------
+uid:            9c599b32
+nt encrypted:   5a920d85
+nt parity err:  1011
+nr encrypted:   98d76b77
+ar encrypted:   d6c6e870
+ar parity err:  0000
+at encrypted:   ca7e0b63
+at parity err:  0111
+next cmd enc:   3e709c8a
 
 
+Starting 4 threads to bruteforce encrypted tag nonce last bytes
+CMD enc(3e709c8a)
+    dec(6000f57b)       <-- Valid cmd
 
+Valid Key found: [ffffffffffff]
 
+Time in mf_nonce_brute (Phase 1): 1763 ticks 2.0 seconds
+pm3 ~/tools/mf_nonce_brute$
